@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff">
+<title>Lightbox</title>
+<style>
+  html, body {
+    position: fixed;
+    top: 0;
+    left: 0;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  #btn {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    min-width: 72px;
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 20px;
+    border: none;
+    background: rgba(0,0,0,0.08);
+    color: rgba(0,0,0,0.4);
+    font-size: 13px;
+    font-family: -apple-system, system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    touch-action: none;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #btn.locked {
+    background: rgba(0,0,0,0.04);
+    color: rgba(0,0,0,0.22);
+  }
+
+  #progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 0%;
+    background: rgba(0,0,0,0.12);
+    z-index: -1;
+  }
+
+  #label {
+    position: relative;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<button id="btn">
+  <div id="progress"></div>
+  <span id="label">Lock</span>
+</button>
+
+<script>
+  const btn = document.getElementById('btn');
+  const label = document.getElementById('label');
+  const progress = document.getElementById('progress');
+
+  const HOLD_MS = 5000;
+  let locked = false;
+  let wakeLock = null;
+  let holdStart = null;
+  let rafId = null;
+
+  function block(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  // Always prevent page scroll/bounce, even when unlocked,
+  // but let the button itself still receive its own touches.
+  document.addEventListener('touchmove', function(e) {
+    if (!btn.contains(e.target)) e.preventDefault();
+  }, { passive: false });
+
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (err) {
+      // ignore - not supported or denied
+    }
+  }
+
+  function releaseWakeLock() {
+    if (wakeLock) {
+      wakeLock.release();
+      wakeLock = null;
+    }
+  }
+
+  function updateLabel() {
+    label.textContent = locked ? 'Unlock' : 'Lock';
+    btn.classList.toggle('locked', locked);
+  }
+
+  function setLocked(state) {
+    locked = state;
+    updateLabel();
+
+    if (locked) {
+      document.addEventListener('touchstart', block, { passive: false, capture: true });
+      document.addEventListener('touchend', block, { passive: false, capture: true });
+      document.addEventListener('gesturestart', block, { capture: true });
+      document.addEventListener('contextmenu', block, { capture: true });
+      requestWakeLock();
+    } else {
+      document.removeEventListener('touchstart', block, { capture: true });
+      document.removeEventListener('touchend', block, { capture: true });
+      document.removeEventListener('gesturestart', block, { capture: true });
+      document.removeEventListener('contextmenu', block, { capture: true });
+      releaseWakeLock();
+    }
+  }
+
+  function startHold(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    holdStart = performance.now();
+    tickProgress();
+  }
+
+  function tickProgress() {
+    if (holdStart === null) return;
+    const elapsed = performance.now() - holdStart;
+    const pct = Math.min(100, (elapsed / HOLD_MS) * 100);
+    progress.style.width = pct + '%';
+
+    if (elapsed >= HOLD_MS) {
+      setLocked(!locked);
+      cancelHold();
+      return;
+    }
+    rafId = requestAnimationFrame(tickProgress);
+  }
+
+  function cancelHold(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    holdStart = null;
+    if (rafId) cancelAnimationFrame(rafId);
+    progress.style.width = '0%';
+  }
+
+  btn.addEventListener('touchstart', startHold, { passive: false });
+  btn.addEventListener('touchend', cancelHold, { passive: false });
+  btn.addEventListener('touchcancel', cancelHold, { passive: false });
+  btn.addEventListener('mousedown', startHold);
+  btn.addEventListener('mouseup', cancelHold);
+  btn.addEventListener('mouseleave', cancelHold);
+
+  document.addEventListener('visibilitychange', () => {
+    if (locked && document.visibilityState === 'visible') {
+      requestWakeLock();
+    }
+  });
+
+  updateLabel();
+
+  // On Android/desktop browsers, a tap anywhere (outside the button)
+  // requests real browser fullscreen. iOS Safari doesn't support this
+  // API for in-browser pages — use Add to Home Screen there instead.
+  function tryFullscreen(e) {
+    if (btn.contains(e.target)) return;
+    if (document.fullscreenElement) return;
+    const el = document.documentElement;
+    if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
+  }
+  document.addEventListener('touchstart', tryFullscreen, { passive: true });
+  document.addEventListener('click', tryFullscreen);
+</script>
+
+</body>
+</html>
